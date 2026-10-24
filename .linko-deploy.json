@@ -1,0 +1,6 @@
+{
+  "service": "pinger.service",
+  "backup_command": ["scripts/backup.sh"],
+  "health_command": ["scripts/health.sh"],
+  "rollback_command": ["scripts/rollback.sh"]
+}

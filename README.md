@@ -51,6 +51,16 @@ WantedBy=default.target
 
 Enable it with `systemctl --user daemon-reload` and `systemctl --user enable --now pinger.service`. On systems where the user service should run before login, enable lingering with `loginctl enable-linger "$USER"`. Inspect service output with `journalctl --user -u pinger.service`.
 
+### Deployment
+
+The repository deploy setup targets the `pinger.service` user unit. Deployment
+installs the merged checkout with `python3 -m pip install --user .` and restarts
+that unit. The hooks in `scripts/` save the first parent revision, check that
+the unit is active, and reinstall the saved source revision on rollback.
+Backups default to `.deploy-backups/` in the checkout; set
+`PINGER_DEPLOY_BACKUP_DIR` to keep them elsewhere. The backup directory is
+ignored by Git and should be retained until the deployment is verified.
+
 ### Cron alternative
 
 Cron is less suitable because it cannot keep the scheduler running to catch a start-up that occurs within ten minutes of a missed slot. To launch it at boot, add `@reboot cd /path/to/checkout && /path/to/pinger run` to your crontab. The process must remain running; configure cron's environment and paths appropriately.
