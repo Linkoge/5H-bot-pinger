@@ -35,10 +35,15 @@ def test_iana_timezone(tmp_path):
 def test_commands_use_isolation_and_correct_modes(tmp_path):
     claude = pinger.command_for(pinger.Provider("claude", True, "claude", "haiku"), tmp_path)
     assert "--print" in claude and "--no-session-persistence" in claude and "--tools" in claude
-    assert claude[-1] == pinger.PROMPT
+    assert claude[claude.index("--model") + 1] == "haiku"
+    assert claude[claude.index("--effort") + 1] == "low"
+    assert claude[-1] == "Reply with only: ok"
     codex = pinger.command_for(pinger.Provider("codex", True, "codex", "luna"), tmp_path)
     assert "--ephemeral" in codex and "--sandbox" in codex and "read-only" in codex
     assert "--cd" in codex and str(tmp_path) in codex
+    assert codex[codex.index("--model") + 1] == "luna"
+    assert codex[codex.index("-c") + 1] == 'model_reasoning_effort="low"'
+    assert codex[-1] == "Reply with only: ok"
 
 
 def test_fake_cli_success_and_failure(tmp_path, monkeypatch):

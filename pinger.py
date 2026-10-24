@@ -87,7 +87,8 @@ def schedule_for(day: date, config: Config) -> list[datetime]:
 
 def command_for(provider: Provider, workdir: Path) -> list[str]:
     if provider.name == "claude":
-        return [provider.binary, "--print", "--model", provider.model, "--tools", "", "--no-session-persistence", PROMPT]
+        return [provider.binary, "--print", "--model", provider.model, "--effort", provider.effort,
+                "--tools", "", "--no-session-persistence", PROMPT]
     if provider.name == "codex":
         return [provider.binary, "exec", "--ephemeral", "--ignore-user-config", "--model", provider.model,
                 "-c", f'model_reasoning_effort="{provider.effort}"', "--sandbox", "read-only", "--cd", str(workdir), PROMPT]

@@ -10,6 +10,7 @@ state_file = ".pinger-state.json"
 enabled = true
 binary = "claude"
 model = "haiku"
+effort = "low" # Claude Code accepts low, medium, high, xhigh, and max (model-dependent)
 
 [codex]
 enabled = true
