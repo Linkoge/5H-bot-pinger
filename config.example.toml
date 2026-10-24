@@ -1,0 +1,18 @@
+# Copy to config.toml and edit. Times use the selected timezone.
+start_time = "07:00"
+gap_minutes = 302
+pings_per_day = 3
+timezone = "local" # or an IANA name such as "Europe/Tbilisi"
+log_file = "pinger.log"
+state_file = ".pinger-state.json"
+
+[claude]
+enabled = true
+binary = "claude"
+model = "haiku"
+
+[codex]
+enabled = true
+binary = "codex"
+model = "luna"
+effort = "low" # Codex currently accepts low, medium, high, xhigh, and max
