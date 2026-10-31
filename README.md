@@ -26,40 +26,28 @@ For example, start at 08:00 with a 302-minute gap to get approximately 08:00, 13
 
 ## Install, configure, and run
 
-Python 3.11 or newer is required. The scheduler uses only the Python standard library. Install the package with `python3 -m pip install .`, then copy `config.example.toml` to `config.toml` and edit it. The config file is ignored by Git. Authentication stays in each CLI's own login; this tool does not store API keys.
+Python 3.11 or newer is required. The scheduler uses only the Python standard library. Install the package in a virtualenv (`python3 -m venv .venv && .venv/bin/pip install .`) or use the automated deployment below, then copy `config.example.toml` to `config.toml` and edit it. The config file is ignored by Git. Authentication stays in each CLI's own login; this tool does not store API keys.
 
 Check today's schedule with `pinger schedule`. Send one immediate request per enabled provider with `pinger ping-now`. Start the persistent scheduler with `pinger run`. These commands use `config.toml` in the current directory; pass `--config /path/to/config.toml` to choose another file.
 
-### systemd user service
+### systemd user service (automatic)
 
-Save the following as `~/.config/systemd/user/pinger.service`, replacing `/path/to/checkout` with the directory containing your config:
+Deployment (`.linko-deploy.json` and `scripts/`) sets everything up; no manual unit is needed:
 
-```ini
-[Unit]
-Description=Scheduled AI CLI warm-up pings
+- Installs the tool into a dedicated venv, `~/.local/share/5h-bot-pinger/venv` (no `pip --user`, which externally-managed Pythons block).
+- Writes `~/.config/systemd/user/pinger.service` (`ExecStart=<venv>/bin/pinger run --config ~/.config/5h-bot-pinger/config.toml`, `Restart=always`, `RestartSec=30`, `WantedBy=default.target`), then runs `systemctl --user daemon-reload`, `enable` and `restart`.
+- Creates `~/.config/5h-bot-pinger/config.toml` from `config.example.toml` only if it does not exist, with `[codex] enabled = false` and Claude enabled; log and state files go under `~/.local/share/5h-bot-pinger/`. An existing config is never overwritten. Set `enabled = true` under `[codex]` once you have a Codex subscription.
+- Tries `loginctl enable-linger "$USER"` so the service runs without a login session. If that is not allowed without sudo, deploy logs a warning and continues; run the command yourself once.
 
-[Service]
-Type=simple
-WorkingDirectory=/path/to/checkout
-ExecStart=%h/.local/bin/pinger run
-Restart=on-failure
-RestartSec=30
+Inspect output with `journalctl --user -u pinger.service`. XDG_DATA_HOME and XDG_CONFIG_HOME are honored.
 
-[Install]
-WantedBy=default.target
-```
+### Deployment hooks
 
-Enable it with `systemctl --user daemon-reload` and `systemctl --user enable --now pinger.service`. On systems where the user service should run before login, enable lingering with `loginctl enable-linger "$USER"`. Inspect service output with `journalctl --user -u pinger.service`.
+- `scripts/backup.sh` saves the first parent revision to `.deploy-backups/` (override with `PINGER_DEPLOY_BACKUP_DIR`; ignored by Git) and records whether the unit and venv existed.
+- `scripts/health.sh` requires `systemctl --user is-active pinger.service` and a successful `pinger schedule` with the deployed config.
+- `scripts/rollback.sh` rebuilds the previous venv and restores the previous unit; on a first install it stops, disables and removes the new unit and venv, tolerating "not loaded".
 
-### Deployment
-
-The repository deploy setup targets the `pinger.service` user unit. Deployment
-installs the merged checkout with `python3 -m pip install --user .` and restarts
-that unit. The hooks in `scripts/` save the first parent revision, check that
-the unit is active, and reinstall the saved source revision on rollback.
-Backups default to `.deploy-backups/` in the checkout; set
-`PINGER_DEPLOY_BACKUP_DIR` to keep them elsewhere. The backup directory is
-ignored by Git and should be retained until the deployment is verified.
+A failing provider (missing binary, not logged in, no subscription, unreachable) only affects itself: each provider pings and retries on its own (every five minutes, six attempts), and unexpected errors in the scheduler loop are logged while it keeps running.
 
 ### Cron alternative
 

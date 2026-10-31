@@ -86,3 +86,43 @@ def test_config_load(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('start_time="07:00"\ngap_minutes=302\npings_per_day=3\ntimezone="UTC"\n[claude]\nenabled=false\n')
     assert not pinger.load_config(path).providers[0].enabled
+
+
+def _quiet_logger(name):
+    logger = logging.getLogger(name)
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    return logger
+
+
+def test_codex_failure_does_not_affect_claude(tmp_path):
+    marker = tmp_path / "claude-ran"
+    claude = tmp_path / "fake-claude"
+    claude.write_text(f"#!{sys.executable}\nopen({str(marker)!r}, 'a').write('x')\n")
+    claude.chmod(0o755)
+    providers = (pinger.Provider("codex", True, str(tmp_path / "missing-codex"), "luna"),
+                 pinger.Provider("claude", True, str(claude), "haiku"))
+    sleeps = []
+    pinger.perform(providers, _quiet_logger("independent"), sleeps.append)
+    assert marker.read_text() == "x"  # claude pinged once, unaffected by codex retries
+    assert sleeps == [300] * 5  # only codex retried
+
+
+def test_unexpected_exception_in_loop_does_not_kill_run(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    calls = []
+    def clock():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return datetime(2026, 1, 1, 12, tzinfo=pinger.timezone_for(cfg))
+    class Stop(Exception):
+        pass
+    sleeps = []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 3:
+            raise Stop
+    with pytest.raises(Stop):
+        pinger.scheduler(cfg, _quiet_logger("loop"), clock, sleep)
+    assert len(calls) == 3

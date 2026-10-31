@@ -1,13 +1,18 @@
 #!/bin/sh
 set -eu
-
-# Save the first parent revision, which is the deployed source before this merge.
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-backup_dir=${PINGER_DEPLOY_BACKUP_DIR:-"$root/.deploy-backups"}
+# Save the first parent revision (the deployed source before this merge) plus
+# whether the unit and venv existed, so rollback also works on a first install.
+. "$(dirname -- "$0")/common.sh"
 mkdir -p "$backup_dir"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-wheel_dir="$backup_dir/$stamp"
-mkdir "$wheel_dir"
-git -C "$root" archive HEAD^ | tar -x -C "$wheel_dir"
-printf '%s\n' "$wheel_dir" > "$backup_dir/latest"
-printf 'Saved rollback wheel in %s\n' "$wheel_dir"
+snap="$backup_dir/$stamp"
+mkdir "$snap"
+git -C "$root" archive HEAD^ | tar -x -C "$snap"
+if [ -f "$unit_file" ]; then
+  cp "$unit_file" "$snap/.had-unit"
+fi
+if [ -x "$venv_dir/bin/pinger" ]; then
+  : > "$snap/.had-venv"
+fi
+printf '%s\n' "$snap" > "$backup_dir/latest"
+printf 'Saved rollback snapshot in %s\n' "$snap"

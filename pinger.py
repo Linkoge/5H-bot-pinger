@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import tomllib
 from dataclasses import dataclass
@@ -118,6 +119,9 @@ def run_one(provider: Provider, log: logging.Logger) -> bool:
     except OSError:
         log.info("%s %s model=%s fail could not start CLI", stamp, provider.name, provider.model)
         return False
+    except Exception as exc:  # one provider's surprise must never escape
+        log.info("%s %s model=%s fail unexpected %s", stamp, provider.name, provider.model, type(exc).__name__)
+        return False
     log.info("%s %s model=%s ok", stamp, provider.name, provider.model)
     return True
 
@@ -137,17 +141,26 @@ def make_logger(path: Path) -> logging.Logger:
     return logger
 
 
-def perform(providers: tuple[Provider, ...], logger: logging.Logger, sleep=time.sleep) -> None:
-    for provider in providers:
-        if not provider.enabled:
-            continue
-        for attempt in range(1, MAX_ATTEMPTS + 1):
+def perform_provider(provider: Provider, logger: logging.Logger, sleep=time.sleep) -> None:
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
             if run_one(provider, logger):
-                break
-            if attempt < MAX_ATTEMPTS:
-                sleep(RETRY_SECONDS)
-        else:
-            logger.info("%s %s skipped after %s attempts", datetime.now().astimezone().isoformat(timespec="seconds"), provider.name, MAX_ATTEMPTS)
+                return
+        except Exception as exc:
+            logger.info("%s %s unexpected %s", datetime.now().astimezone().isoformat(timespec="seconds"), provider.name, type(exc).__name__)
+        if attempt < MAX_ATTEMPTS:
+            sleep(RETRY_SECONDS)
+    logger.info("%s %s skipped after %s attempts", datetime.now().astimezone().isoformat(timespec="seconds"), provider.name, MAX_ATTEMPTS)
+
+
+def perform(providers: tuple[Provider, ...], logger: logging.Logger, sleep=time.sleep) -> None:
+    # Each provider retries on its own thread so a failing one never delays another.
+    threads = [threading.Thread(target=perform_provider, args=(p, logger, sleep), daemon=True)
+               for p in providers if p.enabled]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 def read_state(path: Path) -> set[str]:
@@ -173,13 +186,16 @@ def due_slot(now: datetime, config: Config, state: set[str]) -> datetime | None:
 def scheduler(config: Config, logger: logging.Logger, clock=lambda: datetime.now().astimezone(), sleep=time.sleep) -> None:
     state = read_state(config.state_file)
     while True:
-        now = clock()
-        slot = due_slot(now, config, state)
-        if slot is not None:
-            # Persist before running so a restart never duplicates a ping.
-            state.add(slot.isoformat())
-            write_state(config.state_file, state)
-            perform(config.providers, logger, sleep)
+        try:
+            now = clock()
+            slot = due_slot(now, config, state)
+            if slot is not None:
+                # Persist before running so a restart never duplicates a ping.
+                state.add(slot.isoformat())
+                write_state(config.state_file, state)
+                perform(config.providers, logger, sleep)
+        except Exception as exc:
+            logger.info("%s scheduler error %s: %s", datetime.now().astimezone().isoformat(timespec="seconds"), type(exc).__name__, exc)
         sleep(20)
 
 

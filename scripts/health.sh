@@ -1,4 +1,6 @@
 #!/bin/sh
 set -eu
+. "$(dirname -- "$0")/common.sh"
 systemctl --user is-active --quiet pinger.service
-printf 'pinger.service is active\n'
+"$venv_dir/bin/pinger" schedule --config "$config_file" >/dev/null
+printf 'pinger.service is active and the schedule loads\n'
