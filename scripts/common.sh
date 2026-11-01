@@ -11,6 +11,8 @@ backup_dir=${PINGER_DEPLOY_BACKUP_DIR:-"$root/.deploy-backups"}
 
 write_unit() {
   mkdir -p "$unit_dir"
+  # systemd user services get a minimal PATH; put the claude CLI's directory first.
+  claude_dir=$(dirname -- "$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")")
   cat > "$unit_file" <<UNIT
 [Unit]
 Description=Scheduled AI CLI warm-up pings
@@ -18,6 +20,7 @@ Description=Scheduled AI CLI warm-up pings
 [Service]
 Type=simple
 WorkingDirectory=$app_dir
+Environment="PATH=$claude_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=$venv_dir/bin/pinger run --config $config_file
 Restart=always
 RestartSec=30
