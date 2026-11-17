@@ -9,10 +9,28 @@ unit_dir="$config_home/systemd/user"
 unit_file="$unit_dir/pinger.service"
 backup_dir=${PINGER_DEPLOY_BACKUP_DIR:-"$root/.deploy-backups"}
 
+# Directory holding the claude CLI: PATH first, then the usual install spots.
+find_claude_dir() {
+  found=$(command -v claude 2>/dev/null || true)
+  if [ -z "$found" ]; then
+    for candidate in "$HOME/.local/bin/claude" "$HOME/.claude/local/claude"; do
+      if [ -x "$candidate" ]; then found=$candidate; break; fi
+    done
+  fi
+  if [ -n "$found" ]; then dirname -- "$found"; fi
+}
+
 write_unit() {
   mkdir -p "$unit_dir"
-  # systemd user services get a minimal PATH; put the claude CLI's directory first.
-  claude_dir=$(dirname -- "$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")")
+  # systemd user services get a minimal environment: set HOME and a PATH that finds claude.
+  claude_dir=$(find_claude_dir)
+  if [ -z "$claude_dir" ]; then
+    echo "WARNING: claude CLI not found; install it and log in, then redeploy" >&2
+  fi
+  unit_path="${claude_dir:+$claude_dir:}$HOME/.local/bin:$HOME/.claude/local:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  # systemd treats % specially in unit files.
+  unit_path=$(printf '%s' "$unit_path" | sed 's/%/%%/g')
+  unit_home=$(printf '%s' "$HOME" | sed 's/%/%%/g')
   cat > "$unit_file" <<UNIT
 [Unit]
 Description=Scheduled AI CLI warm-up pings
@@ -20,7 +38,8 @@ Description=Scheduled AI CLI warm-up pings
 [Service]
 Type=simple
 WorkingDirectory=$app_dir
-Environment="PATH=$claude_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="HOME=$unit_home"
+Environment="PATH=$unit_path"
 ExecStart=$venv_dir/bin/pinger run --config $config_file
 Restart=always
 RestartSec=30

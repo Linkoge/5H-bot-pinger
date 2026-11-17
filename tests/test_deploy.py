@@ -23,7 +23,7 @@ def make_checkout(tmp_path):
     return repo
 
 
-def fake_commands(tmp_path, *, active=True, load_failure=False):
+def fake_commands(tmp_path, *, active=True, load_failure=False, claude=True):
     tmp_path.mkdir(parents=True, exist_ok=True)
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -43,6 +43,11 @@ def fake_commands(tmp_path, *, active=True, load_failure=False):
         command.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
+    if claude:
+        claude_dir = home / ".local/bin"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "claude").write_text("#!/bin/sh\nexit 0\n")
+        (claude_dir / "claude").chmod(0o755)
     env = os.environ | {"PATH": f"{bindir}:{os.environ['PATH']}", "COMMAND_LOG": str(log), "HOME": str(home)}
     for var in ("XDG_DATA_HOME", "XDG_CONFIG_HOME"):
         env.pop(var, None)
@@ -72,6 +77,9 @@ def test_deploy_installs_venv_unit_and_bootstraps_config(tmp_path):
     assert "--user" not in commands.split("pip", 1)[-1].splitlines()[0]
     unit = (home / ".config/systemd/user/pinger.service").read_text()
     assert f"ExecStart={venv}/bin/pinger run --config {home}/.config/5h-bot-pinger/config.toml" in unit
+    assert f'Environment="HOME={home}"' in unit
+    path_line = next(line for line in unit.splitlines() if line.startswith('Environment="PATH='))
+    assert f"{home}/.local/bin" in path_line.split("=", 2)[2].split(":")  # directory of the claude binary
     assert "Restart=always" in unit and "RestartSec=30" in unit and "WantedBy=default.target" in unit
     assert commands.index("--user daemon-reload") < commands.index("--user enable pinger.service") < commands.index("--user restart pinger.service")
     assert "loginctl enable-linger" in commands and "WARNING" in result.stderr
@@ -142,3 +150,26 @@ def test_health_checks_unit_state_and_schedule(tmp_path):
     failing_env["HOME"] = env["HOME"]
     result = run_script(repo, "health.sh", failing_env, check=False)
     assert result.returncode == 1
+
+
+def test_unit_path_uses_claude_found_on_path(tmp_path):
+    repo = make_checkout(tmp_path)
+    env, _ = fake_commands(tmp_path / "commands", claude=False)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "claude").write_text("#!/bin/sh\nexit 0\n")
+    (elsewhere / "claude").chmod(0o755)
+    env["PATH"] = f"{elsewhere}:{env['PATH']}"
+    run_script(repo, "deploy.sh", env)
+    unit = (Path(env["HOME"]) / ".config/systemd/user/pinger.service").read_text()
+    assert f'Environment="PATH={elsewhere}:' in unit
+    run_script(repo, "health.sh", env)
+
+
+def test_health_fails_when_claude_is_not_on_unit_path(tmp_path):
+    repo = make_checkout(tmp_path)
+    env, _ = fake_commands(tmp_path / "commands", claude=False)
+    result = run_script(repo, "deploy.sh", env)
+    assert "claude CLI not found" in result.stderr
+    health = run_script(repo, "health.sh", env, check=False)
+    assert health.returncode == 1 and "claude CLI not found" in health.stderr
